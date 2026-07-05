@@ -1,5 +1,5 @@
-from src.engines.whisper_engine import WhisperTinyEngine
+from src.engines.whisper_engine import WhisperEngine
 
 ENGINE_REGISTRY = {
-    "whisper_tiny": WhisperTinyEngine,
+    "whisper": WhisperEngine,
 }

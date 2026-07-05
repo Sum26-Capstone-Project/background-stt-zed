@@ -1,6 +1,6 @@
 id = "background-realtime-stt"
 name = "Background Realtime STT"
-description = "Local speech-to-text server for background voice dictation (whisper-tiny)"
+description = "Local speech-to-text server for background voice dictation (faster-whisper)"
 version = "0.0.1"
 schema_version = 1
 authors = ["wannebetheshy"]

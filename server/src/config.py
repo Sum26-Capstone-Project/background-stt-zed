@@ -11,8 +11,12 @@ class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8764
 
-    default_model: Literal["whisper_tiny"] = "whisper_tiny"
+    default_model: Literal["whisper"] = "whisper"
     default_language: str = "en"
+
+    # faster-whisper model size: tiny/base/small/medium/large-v3.
+    # tiny was too weak in practice; base is the new default.
+    whisper_model_size: str = "base"
 
     whisper_initial_prompt: str = ""
 
