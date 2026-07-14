@@ -83,7 +83,7 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # This service only uses torch to run Silero VAD (small, CPU-only model) --
     # faster-whisper itself runs on ctranslate2, not torch. Install the CPU-only
     # wheel explicitly so we don't pull several GB of CUDA deps nobody needs here.
-    "${VENV_PYTHON}" -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0" "torchaudio>=2.0.0"
+    "${VENV_PYTHON}" -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0"
     if [[ -n "${PROJECT_EXTRAS}" ]]; then
         "${VENV_PYTHON}" -m pip install -e "${SCRIPT_DIR}[${PROJECT_EXTRAS}]"
     else

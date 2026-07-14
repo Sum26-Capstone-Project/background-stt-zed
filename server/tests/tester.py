@@ -4,6 +4,7 @@ import argparse
 import sys
 import wave
 import websockets
+import urllib.parse
 from websockets.exceptions import ConnectionClosed
 
 
@@ -74,12 +75,16 @@ async def receive_task(websocket):
             if data["type"] == "partial":
                 clear_line()
                 text = data["text"]
-                sys.stdout.write(f"\033[90mPartial:\033[0m {text}")
+                found = data.get("found", [])
+                found_str = " \033[93m[FOUND]\033[0m" if any(found) else ""
+                sys.stdout.write(f"\033[90mPartial:\033[0m {text}{found_str}")
                 sys.stdout.flush()
             elif data["type"] == "final":
                 clear_line()
                 text = data["text"]
-                print(f"\033[92mFinal:\033[0m {text}")
+                found = data.get("found", [])
+                found_str = " \033[93m[FOUND]\033[0m" if any(found) else ""
+                print(f"\033[92mFinal:\033[0m {text}{found_str}")
             elif data["type"] == "status":
                 pass  # Ignore ready status here
             elif data["type"] == "error":
@@ -108,6 +113,9 @@ async def main(args):
             print("Model selected successfully.")
 
     uri = f"ws://{args.host}:{args.port}/ws/stream"
+    if args.phrase:
+        query = urllib.parse.urlencode([("phrase", p) for p in args.phrase])
+        uri += f"?{query}"
     print(f"Connecting to {uri}...")
 
     try:
@@ -116,8 +124,12 @@ async def main(args):
             message = await websocket.recv()
             data = json.loads(message)
             if data["type"] != "status" or data["text"] != "ready":
-                print("Failed to initialize stream.")
+                print(f"Failed to initialize stream: {data.get('message', 'Unknown error')}")
                 return
+            
+            phrases = data.get("phrases", [])
+            if phrases:
+                print(f"Server ready. Listening for phrases: {phrases}")
 
             stream_task = asyncio.create_task(audio_stream_task(websocket, args.file))
             recv_task = asyncio.create_task(receive_task(websocket))
@@ -142,6 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="whisper_turbo", help="Model to select before streaming")
     parser.add_argument("--language", default="en", help="Language code")
     parser.add_argument("--file", type=str, help="Path to a 16kHz mono WAV file to stream instead of mic")
+    parser.add_argument("--phrase", action="append", default=[], help="Phrases to detect (can be specified multiple times)")
 
     args = parser.parse_args()
 

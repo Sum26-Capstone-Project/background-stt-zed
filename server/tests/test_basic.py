@@ -4,16 +4,16 @@ def test_config_loads():
     settings = Settings()
     assert settings.host == "127.0.0.1"
     assert settings.port == 8764
-    assert settings.default_model == "whisper_turbo"
+    assert settings.default_model == "whisper_base"
     assert settings.default_language == "en"
 
 
 def test_whisper_registered():
     from src.engines import ENGINE_REGISTRY
-    from src.engines.whisper_engine import WhisperEngine
+    from src.engines.whisper_engine import WhisperBaseEngine
 
-    assert ENGINE_REGISTRY["whisper_turbo"] is WhisperEngine
-    assert WhisperEngine().get_info().name == "whisper_turbo"
+    assert ENGINE_REGISTRY["whisper_base"] is WhisperBaseEngine
+    assert WhisperBaseEngine().get_info().name == "whisper_base"
 
 
 def test_config_migrates_legacy_whisper_model(tmp_path):
@@ -25,7 +25,7 @@ def test_config_migrates_legacy_whisper_model(tmp_path):
         encoding="utf-8",
     )
     settings = Settings.from_yaml(settings_path)
-    assert settings.default_model == "whisper_turbo"
+    assert settings.default_model == "whisper_base"
     assert settings.default_language == "en"
 
 

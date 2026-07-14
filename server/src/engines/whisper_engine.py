@@ -1,5 +1,6 @@
 import gc
 import ctypes
+import re
 import torch
 import numpy as np
 from typing import List
@@ -34,7 +35,6 @@ class WhisperEngine(STTEngine):
         self._loaded = False
         self._device = "cpu"
         self._compute_type = "int8"
-        self._previous_text = ""  # context carryover across segments
 
     def load(self, _language: str) -> None:
         self._language = self.transcribe_language
@@ -50,23 +50,37 @@ class WhisperEngine(STTEngine):
         self.model = WhisperModel(self.model_name, device=self._device, compute_type=self._compute_type)
         self._loaded = True
 
-    # Whisper hallucination: when audio has no speech, the model tends to echo
-    # the initial_prompt verbatim. We detect this via two signals:
-    #   1. no_speech_prob: per-segment probability that there is no speech.
-    #   2. prompt_echo: the segment text is a substring of the initial_prompt
-    #      (or vice-versa), meaning Whisper is regurgitating the prompt.
-    _NO_SPEECH_PROB_THRESHOLD = 0.6
+    _NO_SPEECH_PROB_THRESHOLD = 0.5
+    _MIN_AUDIO_SAMPLES = 3200  # 0.2s at 16kHz — reject extremely short clips
 
-    def _is_hallucination(self, segment_text: str, no_speech_prob: float, prompt: str) -> bool:
+    def _is_hallucination(self, segment_text: str, no_speech_prob: float,
+                          prompt: str, avg_logprob: float) -> bool:
+        """Detect hallucinated segments using multiple signals."""
         if no_speech_prob >= self._NO_SPEECH_PROB_THRESHOLD:
             return True
-        # Check if the text is just echoing the prompt (prompt-echo hallucination).
-        # Normalise both strings so casing/whitespace differences don't matter.
+
+        # Low-confidence output is likely hallucination
+        if avg_logprob < -1.0:
+            return True
+
         text_norm = segment_text.strip().lower()
-        prompt_norm = prompt.strip().lower()
-        if text_norm and prompt_norm:
-            if text_norm in prompt_norm or prompt_norm.startswith(text_norm):
+
+        # Repetition pattern: "no, no, no" or "I don't know, I don't know"
+        # Split into words and check if the same short sequence repeats
+        words = re.findall(r"[a-z']+", text_norm)
+        if len(words) >= 4:
+            # Check for single-word repetition (e.g. "no no no no")
+            unique_words = set(words)
+            if len(unique_words) <= 2 and len(words) >= 4:
                 return True
+            # Check for repeated bigrams/trigrams covering most of the text
+            for ngram_size in (2, 3):
+                if len(words) >= ngram_size * 2:
+                    ngrams = [tuple(words[i:i+ngram_size]) for i in range(len(words) - ngram_size + 1)]
+                    most_common_count = max(ngrams.count(ng) for ng in set(ngrams))
+                    if most_common_count >= 3:
+                        return True
+
         return False
 
     @staticmethod
@@ -78,7 +92,7 @@ class WhisperEngine(STTEngine):
             audio = audio * (0.9 / peak)
         return audio
 
-    def transcribe(self, audio: np.ndarray, is_final: bool = False) -> List[TranscriptionSegment]:
+    def transcribe(self, audio: np.ndarray, is_final: bool = False, prompt_phrases: list[str] | None = None) -> List[TranscriptionSegment]:
         if not self._loaded or self.model is None:
             raise RuntimeError("Whisper model is not loaded.")
 
@@ -86,14 +100,21 @@ class WhisperEngine(STTEngine):
 
         transcribe_language = self.transcribe_language
 
-        # Build prompt: static domain hint + last segment for cross-segment consistency
-        prompt_parts = [settings.whisper_initial_prompt] if settings.whisper_initial_prompt else []
-        if self._previous_text:
-            prompt_parts.append(self._previous_text[-200:])  # last ~200 chars as context
-        prompt = " ".join(prompt_parts)
+        # Build prompt dynamically from provided phrases, falling back to config
+        if prompt_phrases:
+            prompt = ", ".join(prompt_phrases)
+        else:
+            prompt = settings.whisper_initial_prompt or None
 
         # Preprocess audio: remove DC offset, normalise volume
         audio = self._preprocess(audio)
+
+        # Reject audio that is too short or too quiet
+        if len(audio) < self._MIN_AUDIO_SAMPLES:
+            return []
+        rms = np.sqrt(np.mean(audio ** 2))
+        if rms < 0.02:
+            return []
 
         # Pad 200 ms of silence on each side so Whisper doesn't clip the first/last phoneme
         pad_samples = int(0.2 * 16000)
@@ -108,15 +129,24 @@ class WhisperEngine(STTEngine):
             beam_size=beam_size,
             vad_filter=False,  # we handle VAD externally
             without_timestamps=False,
-            initial_prompt=prompt or None,
+            initial_prompt=prompt,
             multilingual=False,
+            # Anti-hallucination parameters
+            condition_on_previous_text=False,
+            repetition_penalty=1.2,
+            no_repeat_ngram_size=3,
+            compression_ratio_threshold=2.0,
+            log_prob_threshold=-0.8,
+            no_speech_threshold=0.5,
+            temperature=0.0,
         )
 
         resolved_language = self.transcribe_language
 
         results = []
         for segment in segments:
-            if self._is_hallucination(segment.text, segment.no_speech_prob, prompt):
+            if self._is_hallucination(segment.text, segment.no_speech_prob,
+                                      prompt or "", segment.avg_logprob):
                 continue
             results.append(TranscriptionSegment(
                 text=segment.text,
@@ -125,10 +155,6 @@ class WhisperEngine(STTEngine):
                 is_final=is_final,
                 language=resolved_language,
             ))
-
-        # Carry the transcribed text forward for next segment's context
-        if is_final and results:
-            self._previous_text = " ".join(r.text for r in results)
 
         return results
 
@@ -148,3 +174,18 @@ class WhisperEngine(STTEngine):
             vram_estimate_mb=self.vram_estimate_mb,
             supported_languages=["en"],
         )
+
+
+class WhisperTinyEngine(WhisperEngine):
+    engine_name = "whisper_tiny"
+    model_name = "tiny.en"
+    vram_estimate_mb = 1000
+
+
+class WhisperBaseEngine(WhisperEngine):
+    """Lightweight engine using base.en — good balance of speed and accuracy
+    for short phrase/keyword detection. Much less hallucination-prone than
+    tiny.en while still being very fast on CPU."""
+    engine_name = "whisper_base"
+    model_name = "base.en"
+    vram_estimate_mb = 1500

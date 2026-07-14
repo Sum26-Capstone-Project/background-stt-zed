@@ -12,6 +12,8 @@ class FakeWebSocket:
         self.sent = []
         self.accepted = False
         self.closed = False
+        from starlette.websockets import WebSocketState
+        self.client_state = WebSocketState.CONNECTED
 
     async def accept(self):
         self.accepted = True
@@ -41,7 +43,7 @@ class FakeEngine:
     def __init__(self):
         self.transcribed_audio = []
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, is_final=False, prompt_phrases=None):
         self.transcribed_audio.append(audio)
         return [SimpleNamespace(text="final text")]
 
@@ -57,15 +59,16 @@ async def test_websocket_stream_sends_only_final_transcriptions(monkeypatch):
     monkeypatch.setattr(routes.model_manager, "active_engine", engine)
     monkeypatch.setattr(routes, "AudioProcessor", FakeAudioProcessor)
 
-    await routes.websocket_stream(websocket)
+    await routes.websocket_stream(websocket, phrase=["final"])
 
     assert websocket.accepted
     assert websocket.closed
-    assert [message["type"] for message in websocket.sent] == ["status", "final"]
-    assert websocket.sent[1] == {
+    assert [message["type"] for message in websocket.sent] == ["status", "partial", "final"]
+    assert websocket.sent[2] == {
         "type": "final",
         "text": "final text",
+        "found": [True],
         "segment_id": 0,
         "is_final": True,
     }
-    assert engine.transcribed_audio == [["final-audio"]]
+    assert engine.transcribed_audio == [["partial-audio"], ["final-audio"]]

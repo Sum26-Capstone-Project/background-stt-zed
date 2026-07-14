@@ -16,6 +16,7 @@ server/__pycache__/
 server/**/__pycache__/
 *.pyc
 *.egg-info/
+.bootstrap
 
 # Local logs
 /tmp/background-realtime-stt.log

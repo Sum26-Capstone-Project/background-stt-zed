@@ -46,7 +46,7 @@ def _tokenize(s: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", s.lower())
 
 
-def phrase_in_text(phrase: str, text: str, word_threshold: float = 0.5) -> bool:
+def phrase_in_text(phrase: str, text: str, word_threshold: float = 0.75) -> bool:
     """Fuzzy word-sequence match.
 
     Returns True if the phrase's words appear consecutively in the text,
@@ -81,7 +81,7 @@ async def send_phrase_match(
     is_final: bool = False,
 ) -> bool:
     try:
-        segments = await asyncio.to_thread(model_manager.active_engine.transcribe, audio, is_final)
+        segments = await asyncio.to_thread(model_manager.active_engine.transcribe, audio, is_final, phrases)
     except Exception as e:
         await websocket.send_text(json.dumps({
             "type": "error",
@@ -158,7 +158,10 @@ async def websocket_stream(websocket: WebSocket, phrase: list[str] = Query(defau
 
                 for event in events:
                     if event.type == "partial_ready":
-                        if not await send_phrase_match(websocket, "partial", event.audio, segment_id, phrases, is_final=False):
+                        # For partials, only transcribe the last 2 seconds (32000 samples)
+                        # to keep inference time constant and fast.
+                        partial_audio = event.audio[-32000:] if len(event.audio) > 32000 else event.audio
+                        if not await send_phrase_match(websocket, "partial", partial_audio, segment_id, phrases, is_final=False):
                             transcription_failed = True
                             return
                     elif event.type == "speech_end":

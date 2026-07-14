@@ -1,13 +1,13 @@
 host: "127.0.0.1"
 port: 8764
 
-default_model: "whisper_turbo"
+default_model: "whisper_base"
 default_language: "en"
 
-whisper_initial_prompt: ""
+whisper_initial_prompt: "start zed, stop zed, hey zed, wake up"
 
 vad_threshold: 0.5
 audio_sample_rate: 16000
 audio_chunk_ms: 100
-partial_interval_s: 1.0
+partial_interval_s: 0.5
 max_buffer_s: 30.0

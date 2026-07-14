@@ -27,7 +27,7 @@ class STTEngine(ABC):
         pass
 
     @abstractmethod
-    def transcribe(self, audio: np.ndarray, is_final: bool = False) -> List[TranscriptionSegment]:
+    def transcribe(self, audio: np.ndarray, is_final: bool = False, prompt_phrases: list[str] | None = None) -> List[TranscriptionSegment]:
         pass
 
     @abstractmethod
